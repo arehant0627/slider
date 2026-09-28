@@ -6,3 +6,4 @@ scipy>=1.11
 yfinance>=0.2.40
 requests
 lxml
+python-dotenv
