@@ -54,7 +54,7 @@ def expirations_live(key):
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
 def universe_live():
-    return data.nasdaq100()
+    return data.nasdaq100_with_source()
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
@@ -125,10 +125,11 @@ if go:
     status = st.status("Finding trades…", expanded=True)
     if demo:
         names = [n for n in W["names"] if (n in data.ETFS or use_stock_puts or use_cc or n in holdings)]
+        uni_src = "demo"
         close, rate, earn, unknown = W["close"], W["rate"], W["earnings"], set()
     else:
         status.write("Nasdaq-100 list and prices…")
-        stocks = universe_live() if (use_stock_puts or use_cc) else []
+        stocks, uni_src = universe_live() if (use_stock_puts or use_cc) else ([], "not used")
         names = sorted(set(stocks) | set(data.ETFS) | set(holdings))
         close = prices_live(tuple(sorted(set(names) | {"QQQ"})))
         rate = rate_live()
@@ -170,7 +171,7 @@ if go:
     status.update(label="Done", state="complete", expanded=False)
     st.session_state["result"] = dict(res=res, target=target, account=account, cash=cash, unit=unit, target_in=target_in,
                                       exp=exp, skipped=skipped, src=src, unknown=unknown, n_cand=len(cand), demo=demo,
-                                      check=check,
+                                      check=check, uni_src=uni_src,
                                       holdings=holdings)
 
 # ---------------------------------------------------------------- results
@@ -255,6 +256,7 @@ else:
 with st.expander(f"Data check and names left out ({len(R['skipped'])} left out)"):
     srcs = pd.Series({k: v[0] for k, v in R["src"].items()}).value_counts()
     st.write("Quote sources: " + ", ".join(f"{k}: {v}" for k, v in srcs.items()))
+    st.write(f"Nasdaq-100 list: {R.get('uni_src', '')}")
     chk = R["check"].copy()
     chk["gap"] = chk["price from options"] / chk["last trade (Yahoo)"] - 1
     st.caption("Every name's price as implied by its option quotes, next to its last trade. Names more than 10% apart "

@@ -141,20 +141,49 @@ def fetch_chains(client, symbols, expiration, workers=2, progress=None):
 
 
 # ---------------------------------------------------------------- other sources
+SAVED_UNIVERSE = os.path.join(HERE, "universe.csv")
+WIKI_URL = "https://en.wikipedia.org/wiki/Nasdaq-100"
+
+
+def parse_ndx_tables(html: str) -> list[str]:
+    """The constituents table: the column whose header mentions Ticker or Symbol (footnote marks allowed),
+    in a table with 90+ ticker-looking values."""
+    import re
+    for t in pd.read_html(io.StringIO(html)):
+        if isinstance(t.columns, pd.MultiIndex):
+            t.columns = [" ".join(map(str, c)) for c in t.columns]
+        for col in t.columns:
+            if not re.search(r"ticker|symbol", str(col), re.I):
+                continue
+            v = t[col].astype(str).str.upper().str.replace(r"\[.*?\]", "", regex=True).str.strip()
+            v = v[v.str.fullmatch(r"[A-Z]{1,5}(\.[A-Z])?")]
+            if v.nunique() >= 90:
+                return sorted(v.unique())
+    return []
+
+
+def nasdaq100_with_source():
+    """Today's Nasdaq-100 from Wikipedia; if that fails, the list saved with the app (universe.csv)."""
+    why = ""
+    try:
+        import requests
+        r = requests.get(WIKI_URL, timeout=20,
+                         headers={"User-Agent": "options-picker/1.0 (personal research app; https://github.com/arehant0627)"})
+        r.raise_for_status()
+        names = parse_ndx_tables(r.text)
+        if names:
+            return names, "Wikipedia (today's list)"
+        why = "no constituents table found"
+    except Exception as e:                                      # noqa: BLE001
+        why = f"{type(e).__name__}: {str(e)[:80]}"
+    if os.path.exists(SAVED_UNIVERSE):
+        names = sorted(pd.read_csv(SAVED_UNIVERSE, comment="#").iloc[:, 0].astype(str).str.strip().str.upper().unique())
+        return names, f"saved list in universe.csv (Wikipedia unavailable: {why})"
+    raise RuntimeError(f"Couldn't get the Nasdaq-100 list from Wikipedia ({why}) and there is no universe.csv next to app.py.")
+
+
 def nasdaq100() -> list[str]:
-    """Current Nasdaq-100 members: universe.csv next to the app if present, else Wikipedia."""
-    p = os.path.join(HERE, "universe.csv")
-    if os.path.exists(p):
-        return sorted(pd.read_csv(p).iloc[:, 0].astype(str).str.strip().str.upper().unique())
-    import requests
-    r = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", timeout=20,
-                     headers={"User-Agent": "Mozilla/5.0 (options picker; personal use)"})
-    for t in pd.read_html(io.StringIO(r.text)):
-        cols = {str(c).lower(): c for c in t.columns}
-        key = next((cols[k] for k in ("ticker", "symbol") if k in cols), None)
-        if key is not None and len(t) >= 90:
-            return sorted(t[key].astype(str).str.strip().str.upper().unique())
-    raise RuntimeError("Couldn't find the Nasdaq-100 table on Wikipedia; add a universe.csv with one ticker per line.")
+    return nasdaq100_with_source()[0]
 
 
 def price_history(symbols, years=4):
